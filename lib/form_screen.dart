@@ -99,10 +99,12 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
       _selectedVehicleType = data['vehicleType']; // 設定車種選單值
       _selectedCity = data['city']; // 設定縣市選單值
       _selectedDistrict = data['district']; // 設定區域選單值
-      if (data['issueDate'] != null)
+      if (data['issueDate'] != null) {
         _issueDate = DateTime.parse(data['issueDate']); // 解析字串為日期物件
-      if (data['violationDate'] != null)
+      }
+      if (data['violationDate'] != null) {
         _violationDate = DateTime.parse(data['violationDate']); // 解析違規日期
+      }
     });
   }
 
@@ -444,8 +446,9 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                             context: context,
                             initialTime: TimeOfDay.now(),
                           ); // 獲取時間
-                          if (t != null)
+                          if (t != null) {
                             setState(() => _violationTime = t); // 更新狀態
+                          }
                         },
                         decoration: const InputDecoration(
                           labelText: '違規時間',

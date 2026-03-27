@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'form_screen.dart'; // 確保路徑正確
-import 'list_screen.dart'; // 確保路徑正確
+import 'form_screen.dart';
+import 'list_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +25,12 @@ class TrafficViolationApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.blue,
+        // 設定全域的字體，讓 Web 版中文更清晰
+        fontFamily: 'PingFang TC',
+      ),
       home: const MainNavigationScreen(),
     );
   }
@@ -39,33 +44,34 @@ class MainNavigationScreen extends StatefulWidget {
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
-  int _currentIndex = 0;
+  // 🚩 關鍵修改：將初始值設為 1，App 一進來就是「案件檢索」
+  int _currentIndex = 1;
 
-  // 【關鍵 1】用於暫存從清單頁傳回來的修改資料
+  // 用於暫存從清單頁傳回來的修改資料
   Map<String, dynamic>? _dataToEdit;
 
-  // 【關鍵 2】定義跳轉並修改的方法
+  // 定義跳轉並修改的方法
   void _jumpToEdit(Map<String, dynamic> data) {
     setState(() {
       _dataToEdit = data; // 設定要修改的資料
-      _currentIndex = 0; // 強制跳回第一個分頁 (錄入頁)
+      _currentIndex = 0; // 跳回第一個分頁 (資料錄入) 進行編輯
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // 【關鍵 3】在建立頁面時，把參數傳進去
+    // 定義分頁內容
     final List<Widget> pages = [
       ViolationFormScreen(
-        initialData: _dataToEdit, // 傳入初始資料 (新增時為 null)
+        initialData: _dataToEdit,
         onSaveComplete: () {
-          // 當表單儲存成功後，執行這個回呼
-          setState(() => _dataToEdit = null); // 清空修改狀態，變回新增模式
+          setState(() {
+            _dataToEdit = null;
+            _currentIndex = 1; // 儲存完自動跳回檢索頁，體驗更好
+          });
         },
       ),
-      ViolationListScreen(
-        onEditTriggered: _jumpToEdit, // 把跳轉方法傳給清單頁
-      ),
+      ViolationListScreen(onEditTriggered: _jumpToEdit),
     ];
 
     return Scaffold(
@@ -75,13 +81,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         onTap: (index) {
           setState(() {
             _currentIndex = index;
-            // 如果使用者手動切換分頁，通常建議清空修改狀態
+            // 如果使用者是手動切換到檢索頁，清空編輯暫存
             if (index == 1) _dataToEdit = null;
           });
         },
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.add_task), label: '資料錄入'),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: '案件檢索'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.add_task),
+            activeIcon: Icon(Icons.playlist_add_check_circle_rounded),
+            label: '資料錄入',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.search),
+            activeIcon: Icon(Icons.manage_search_rounded),
+            label: '案件檢索',
+          ),
         ],
       ),
     );
