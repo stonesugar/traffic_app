@@ -545,7 +545,7 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
   Widget _buildSlidableCard(Map<String, dynamic> data) {
     final String caseNo = data['caseNo'] ?? "N/A";
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Slidable(
         key: ValueKey(caseNo),
         endActionPane: ActionPane(
@@ -582,31 +582,40 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
       margin: EdgeInsets.zero,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10), // 稍微圓角一點
         side: BorderSide(color: Colors.grey[200]!),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.all(12),
+        // 🚩 核心修改：開啟高密度模式
+        dense: true,
+        // 🚩 縮減上下內距
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        // 🚩 縮小左側圖示尺寸
         leading: Container(
-          width: 48,
-          height: 48,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
             color: isSuccess ? Colors.green[50] : Colors.red[50],
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
             isSuccess ? Icons.check_circle_rounded : Icons.info_outline_rounded,
             color: isSuccess ? Colors.green[700] : Colors.red[700],
+            size: 20, // 圖示也縮小一點
           ),
         ),
         title: Text(
           '車牌: ${data['plateNo'] ?? "未知"}',
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ), // 字體稍微調小
         ),
         subtitle: Text(
           '案號: ${data['caseNo']}\n日期: ${_formatDate(data['violationDate'])}',
+          style: const TextStyle(fontSize: 12, height: 1.3), // 縮減行高
         ),
-        trailing: const Icon(Icons.chevron_right_rounded),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
         onTap: () async {
           if (!context.mounted) return;
           _showDetailDialog(context, data);
