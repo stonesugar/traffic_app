@@ -16,7 +16,69 @@ class ViolationListScreen extends StatefulWidget {
 class _ViolationListScreenState extends State<ViolationListScreen> {
   String _searchQuery = "";
   bool _isExporting = false;
+  // 🚩 新增：登入狀態控制
+  bool _isLoggedIn = false;
+
   final TextEditingController _searchCtrl = TextEditingController();
+
+  // --- 🚩 管理員登入視窗 ---
+  void _showLoginDialog() {
+    final TextEditingController userCtrl = TextEditingController();
+    final TextEditingController passCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('管理員登入'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: userCtrl,
+              decoration: const InputDecoration(
+                labelText: '帳號',
+                hintText: '請輸入帳號',
+              ),
+            ),
+            TextField(
+              controller: passCtrl,
+              obscureText: true, // 隱藏密碼
+              decoration: const InputDecoration(
+                labelText: '密碼',
+                hintText: '請輸入密碼',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // 🚩 檢查帳號: stone, 密碼: 661222
+              if (userCtrl.text == 'stone' && passCtrl.text == '661222') {
+                setState(() => _isLoggedIn = true);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('🔓 登入成功，已開啟管理權限')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('❌ 帳號或密碼錯誤'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('登入'),
+          ),
+        ],
+      ),
+    );
+  }
 
   // --- 分頁控制變數 ---
   int _currentPage = 1;
@@ -235,24 +297,67 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
+        // 🚩 重點修改：將按鈕移至這裡
         actions: [
-          IconButton(
-            icon: const Icon(Icons.history_rounded),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const OperationLogScreen(),
-              ),
+          // 🚩 如果沒登入，只顯示「鎖頭」按鈕
+          if (!_isLoggedIn)
+            IconButton(
+              icon: const Icon(Icons.admin_panel_settings_rounded),
+              onPressed: _showLoginDialog,
+              tooltip: '管理員登入',
             ),
-            tooltip: '查看操作日誌',
-          ),
+
+          // 🚩 如果已登入，顯示 3 個功能 + 登出按鈕
+          if (_isLoggedIn) ...[
+            IconButton(
+              icon: const Icon(Icons.file_upload_rounded),
+              onPressed: _isExporting ? null : _handleImport,
+              tooltip: '匯入檔案',
+            ),
+            _isExporting
+                ? const Padding(
+                    padding: EdgeInsets.all(12.0),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.file_download_rounded),
+                    onPressed: _handleExport,
+                    tooltip: '匯出 Excel',
+                  ),
+            IconButton(
+              icon: const Icon(Icons.history_rounded),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const OperationLogScreen(),
+                ),
+              ),
+              tooltip: '操作日誌',
+            ),
+            // 🚩 新增：登出按鈕
+            IconButton(
+              icon: const Icon(Icons.logout_rounded, color: Colors.red),
+              onPressed: () {
+                setState(() => _isLoggedIn = false);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('🔒 已登出管理模式')));
+              },
+              tooltip: '登出',
+            ),
+          ],
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: [
           _buildSearchBar(),
-          Expanded(child: _buildMainList()), // 列表區域
-          _buildBottomActions(),
+          Expanded(child: _buildMainList()),
+          // 🚩 這裡原本的 _buildBottomActions() 已經刪除了
         ],
       ),
     );
@@ -260,8 +365,18 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
 
   Widget _buildSearchBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      color: Colors.white,
+      // 將原本底部的 16 稍微縮減或維持，看你喜歡的緊湊感
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: TextField(
         controller: _searchCtrl,
         decoration: InputDecoration(
@@ -495,56 +610,6 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
           if (!context.mounted) return;
           _showDetailDialog(context, data);
         },
-      ),
-    );
-  }
-
-  Widget _buildBottomActions() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _isExporting ? null : _handleImport,
-                icon: const Icon(Icons.upload_file_rounded),
-                label: const Text('匯入檔案'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isExporting ? null : _handleExport,
-                icon: _isExporting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.download_rounded),
-                label: Text(_isExporting ? '處理中...' : '匯出 Excel'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[700],
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
