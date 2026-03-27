@@ -70,32 +70,34 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             _currentIndex = 1; // 儲存完自動跳回檢索頁，體驗更好
           });
         },
+
+        // 🚩 新增：處理取消按鈕
+        onCancel: () {
+          setState(() {
+            _dataToEdit = null;
+            _currentIndex = 1; // 取消後直接回清單
+          });
+        },
       ),
+
       ViolationListScreen(onEditTriggered: _jumpToEdit),
     ];
 
     return Scaffold(
-      body: pages[_currentIndex],
+      // 🚩 關鍵修改：將 body 從 pages[_currentIndex] 換成 IndexedStack
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
           setState(() {
             _currentIndex = index;
-            // 如果使用者是手動切換到檢索頁，清空編輯暫存
+            // 如果從錄入頁主動切換走，清空編輯資料，恢復為「新增模式」
             if (index == 1) _dataToEdit = null;
           });
         },
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add_task),
-            activeIcon: Icon(Icons.playlist_add_check_circle_rounded),
-            label: '資料錄入',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            activeIcon: Icon(Icons.manage_search_rounded),
-            label: '案件檢索',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.add_task), label: '資料錄入'),
+          BottomNavigationBarItem(icon: Icon(Icons.search), label: '案件檢索'),
         ],
       ),
     );
