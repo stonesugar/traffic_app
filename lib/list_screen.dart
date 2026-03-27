@@ -371,7 +371,8 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            // 🚩 這裡已經修正為新的 .withValues 語法
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 5,
             offset: const Offset(0, 2),
           ),
