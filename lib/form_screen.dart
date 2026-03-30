@@ -287,7 +287,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                       child: DropdownButtonFormField<String>(
                         value: _selectedVehicleType,
                         decoration: const InputDecoration(
-                          labelText: '車種*',
+                          labelText: '車種',
                           helperText: '',
                         ),
                         items: _vehicleTypes
