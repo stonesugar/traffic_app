@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart'; // 🚩 記得要匯入這個才能用 TextInputFormatter
 
 class ViolationFormScreen extends StatefulWidget {
   final Map<String, dynamic>? initialData; // 修改模式的初始資料
@@ -608,27 +609,51 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     DateTime? date,
     Function(DateTime) onPicked,
   ) {
+    // 🚩 這裡要動態產生日期的文字顯示 (YYYY/MM/DD)
+    final String dateString = date != null
+        ? "${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}"
+        : "";
+
     return TextFormField(
-      readOnly: true,
-      onTap: () async {
-        final d = await showDatePicker(
-          context: context,
-          initialDate: date ?? DateTime.now(),
-          firstDate: DateTime(2020),
-          lastDate: DateTime(2030),
-          locale: const Locale('zh', 'TW'),
-        );
-        if (d != null) onPicked(d);
-      },
+      // 🚩 這裡關鍵：每次重建時將正確的日期文字塞入
+      controller: TextEditingController(text: dateString)
+        ..selection = TextSelection.collapsed(offset: dateString.length),
+      readOnly: false, // 🚩 開啟打字功能
+      keyboardType: TextInputType.number, // 🚩 強制跳出數字鍵盤
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly, // 只許數字
+        DateInputFormatter(), // 🚩 掛上自動斜線工具
+        LengthLimitingTextInputFormatter(10), // 限制長度
+      ],
       decoration: InputDecoration(
         labelText: label,
-        suffixIcon: const Icon(Icons.event),
-        helperText: '',
+        helperText: '可直接輸入或點選右側圖示',
+        suffixIcon: IconButton(
+          icon: const Icon(Icons.event),
+          onPressed: () async {
+            // 🚩 將彈窗功能移到圖示上，這樣點格子打字才不會一直跳彈窗
+            final d = await showDatePicker(
+              context: context,
+              initialDate: date ?? DateTime.now(),
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2030),
+              locale: const Locale('zh', 'TW'),
+            );
+            if (d != null) onPicked(d);
+          },
+        ),
       ),
-      controller: TextEditingController(
-        text: date?.toString().split(' ')[0] ?? '',
-      ),
-      validator: (v) => date == null ? '必選' : null,
+      // 🚩 當使用者「手動打字」完畢時，即時更新日期物件
+      onChanged: (value) {
+        if (value.length == 10) {
+          // 將 YYYY/MM/DD 轉回 YYYY-MM-DD 讓 DateTime 解析
+          final parsed = DateTime.tryParse(value.replaceAll('/', '-'));
+          if (parsed != null) {
+            onPicked(parsed);
+          }
+        }
+      },
+      validator: (v) => date == null ? '請輸入日期' : null,
     );
   }
 
@@ -643,5 +668,36 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     _unitCtrl.dispose();
     _officerCtrl.dispose();
     super.dispose();
+  }
+}
+
+// 🚩 請把這段 class 貼在 form_screen.dart 的最下方（類別外面）
+class DateInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final text = newValue.text;
+
+    // 如果是刪除文字，不進行自動補位
+    if (newValue.selection.baseOffset < oldValue.selection.baseOffset) {
+      return newValue;
+    }
+
+    String newText = text;
+    // 當輸入到第 4 碼 (年) 自動加斜線
+    if (text.length == 4) {
+      newText = '$text/';
+    }
+    // 當輸入到第 7 碼 (月) 自動加斜線 (因為含第一條斜線，所以是第7位)
+    else if (text.length == 7) {
+      newText = '$text/';
+    }
+
+    return newValue.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newText.length),
+    );
   }
 }
