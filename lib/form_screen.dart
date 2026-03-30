@@ -221,7 +221,6 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                             )
                             .toList(),
                         onChanged: (v) => setState(() => _selectedResult = v),
-                        validator: (v) => v == null ? '必選' : null,
                       ),
                     ),
                     const SizedBox(width: 12),
