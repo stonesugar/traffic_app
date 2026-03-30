@@ -1,16 +1,20 @@
-import 'package:flutter/material.dart'; // 匯入 Flutter 核心 UI 元件庫
-import 'package:cloud_firestore/cloud_firestore.dart'; // 匯入 Firebase 資料庫套件
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ViolationFormScreen extends StatefulWidget {
-  final Map<String, dynamic>? initialData; // 接收外部傳入的初始資料（用於修改模式）
-  final VoidCallback onSaveComplete; // 儲存成功後要執行的高層級回呼函式
-  final VoidCallback onCancel;
+  final Map<String, dynamic>? initialData; // 修改模式的初始資料
+  final VoidCallback onSaveComplete; // 儲存成功回呼
+  final VoidCallback onCancel; // 取消修改回呼
+  final bool isLoggedIn; // 全域登入狀態
+  final VoidCallback onLoginSuccess; // 登入成功回呼
 
   const ViolationFormScreen({
     super.key,
     this.initialData,
     required this.onSaveComplete,
     required this.onCancel,
+    required this.isLoggedIn,
+    required this.onLoginSuccess,
   });
 
   @override
@@ -20,7 +24,7 @@ class ViolationFormScreen extends StatefulWidget {
 class _ViolationFormScreenState extends State<ViolationFormScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  // --- 定義文字輸入控制器 ---
+  // --- 文字輸入控制器 ---
   final _caseNoCtrl = TextEditingController();
   final _plateNoCtrl = TextEditingController();
   final _fineCtrl = TextEditingController();
@@ -30,7 +34,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
   final _unitCtrl = TextEditingController();
   final _officerCtrl = TextEditingController();
 
-  // --- 定義狀態變數 ---
+  // --- 狀態變數 ---
   DateTime? _issueDate;
   DateTime? _violationDate;
   TimeOfDay? _violationTime;
@@ -50,7 +54,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
   @override
   void initState() {
     super.initState();
-    // 🚩 修改點 1：如果一進來就有初始資料，直接呼叫填充方法
+    // 初始化時若有資料，則填充表單
     if (widget.initialData != null) {
       _fillData(widget.initialData!);
     }
@@ -59,6 +63,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
   @override
   void didUpdateWidget(ViolationFormScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 當外部傳入的 initialData 改變時（例如從修改切換回新增），同步更新 UI
     if (widget.initialData != oldWidget.initialData) {
       if (widget.initialData != null) {
         _fillData(widget.initialData!);
@@ -68,7 +73,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     }
   }
 
-  // --- 🚩 修改點 2：加強版填充邏輯，解決日期斜線崩潰問題 ---
+  // --- 填充資料邏輯 (支援修改模式) ---
   void _fillData(Map<String, dynamic> data) {
     _caseNoCtrl.text = (data['caseNo'] ?? "").toString();
     _plateNoCtrl.text = (data['plateNo'] ?? "").toString();
@@ -85,21 +90,20 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
       _selectedCity = data['city'];
       _selectedDistrict = data['district'];
 
-      // 處理舉發日期 (斜線轉橫線防噴)
+      // 解析日期：處理斜線與橫線相容性
       if (data['issueDate'] != null) {
         String dateStr = data['issueDate'].toString().replaceAll('/', '-');
         _issueDate = DateTime.tryParse(dateStr);
       }
-      // 處理違規日期 (斜線轉橫線防噴)
       if (data['violationDate'] != null) {
         String dateStr = data['violationDate'].toString().replaceAll('/', '-');
         _violationDate = DateTime.tryParse(dateStr);
       }
-
-      // 處理違規時間 (如果是 2036 這種格式的防彈處理已在後續顯示處處理)
+      // 時間格式通常為字串，顯示處會處理
     });
   }
 
+  // --- 重置表單 ---
   void _resetForm() {
     _formKey.currentState?.reset();
     _caseNoCtrl.clear();
@@ -121,8 +125,10 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     });
   }
 
+  // --- 儲存資料到 Firebase ---
   Future<void> _saveData() async {
     if (!_formKey.currentState!.validate()) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -157,7 +163,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
           .set(data, SetOptions(merge: true));
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context); // 關閉進度條
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('🎉 儲存成功！')));
@@ -172,8 +178,92 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     }
   }
 
+  // --- 🔐 驗證彈窗 ---
+  void _showLoginDialog() {
+    final userCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('管理員權限驗證'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: userCtrl,
+              decoration: const InputDecoration(labelText: '帳號'),
+            ),
+            TextField(
+              controller: passCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '密碼'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (userCtrl.text == 'stone' && passCtrl.text == '661222') {
+                widget.onLoginSuccess();
+                Navigator.pop(context);
+              } else {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('❌ 驗證失敗')));
+              }
+            },
+            child: const Text('驗證'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 🔏 鎖定畫面 UI ---
+  Widget _buildLockedUI() {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.lock_person_rounded, size: 80, color: Colors.blue[200]),
+            const SizedBox(height: 20),
+            const Text(
+              '受限區域：資料錄入功能',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            const Text('請先驗證管理員身份後再進行操作', style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 30),
+            ElevatedButton.icon(
+              onPressed: _showLoginDialog,
+              icon: const Icon(Icons.verified_user_rounded),
+              label: const Text('立即驗證身份', style: TextStyle(fontSize: 16)),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 40,
+                  vertical: 15,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 🚩 檢查權限
+    if (!widget.isLoggedIn) return _buildLockedUI();
+
     bool isEditMode = widget.initialData != null;
 
     return Scaffold(
@@ -209,8 +299,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value:
-                            _selectedResult, // 🚩 注意：Dropdown 的屬性是 value，不是 initialValue
+                        value: _selectedResult,
                         decoration: const InputDecoration(
                           labelText: '結果',
                           helperText: '',
@@ -422,51 +511,32 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                 ),
               ]),
 
-              // 🚩 替換原本最下方的提交按鈕區塊
+              // --- 按鈕區塊 ---
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 child: isEditMode
                     ? Row(
                         children: [
-                          // --- 取消按鈕 ---
                           Expanded(
                             child: SizedBox(
-                              height: 45, // 高度調小一點，比較精緻
+                              height: 45,
                               child: OutlinedButton(
                                 onPressed: widget.onCancel,
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.grey[700],
-                                  side: BorderSide(color: Colors.grey[400]!),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                                child: const Text(
-                                  '取消修改',
-                                  style: TextStyle(fontSize: 15),
-                                ),
+                                child: const Text('取消修改'),
                               ),
                             ),
                           ),
                           const SizedBox(width: 12),
-                          // --- 儲存按鈕 ---
                           Expanded(
                             child: SizedBox(
                               height: 45,
                               child: ElevatedButton.icon(
                                 onPressed: _saveData,
-                                icon: const Icon(Icons.check_rounded, size: 18),
-                                label: const Text(
-                                  '儲存修改',
-                                  style: TextStyle(fontSize: 15),
-                                ),
+                                icon: const Icon(Icons.check),
+                                label: const Text('儲存修改'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.orange[800],
                                   foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
                                 ),
                               ),
                             ),
@@ -474,7 +544,6 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                         ],
                       )
                     : SizedBox(
-                        // --- 原本的新增模式按鈕 (維持全寬) ---
                         width: double.infinity,
                         height: 55,
                         child: ElevatedButton.icon(
@@ -490,9 +559,6 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue[700],
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
                           ),
                         ),
                       ),
@@ -505,6 +571,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     );
   }
 
+  // --- 小工具：卡片區塊 ---
   Widget _buildCardSection(String title, List<Widget> children) {
     return Card(
       margin: const EdgeInsets.only(bottom: 20),
@@ -535,6 +602,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
     );
   }
 
+  // --- 小工具：日期選取器 ---
   Widget _buildDatePicker(
     String label,
     DateTime? date,
@@ -548,11 +616,7 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
           initialDate: date ?? DateTime.now(),
           firstDate: DateTime(2020),
           lastDate: DateTime(2030),
-          // 🚩 強制指定使用中文地區設定，這樣輸入框就會變成 YYYY/MM/DD
           locale: const Locale('zh', 'TW'),
-          // 🚩 你也可以自定義輸入框的提示文字
-          fieldLabelText: label,
-          fieldHintText: '年/月/日',
         );
         if (d != null) onPicked(d);
       },

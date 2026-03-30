@@ -7,7 +7,17 @@ import 'log_screen.dart';
 
 class ViolationListScreen extends StatefulWidget {
   final Function(Map<String, dynamic>) onEditTriggered;
-  const ViolationListScreen({super.key, required this.onEditTriggered});
+  final bool isLoggedIn; // 🚩 確保有這一行
+  final VoidCallback onLoginSuccess; // 🚩 確保有這一行
+  final VoidCallback onLogout; // 🚩 確保有這一行
+
+  const ViolationListScreen({
+    super.key,
+    required this.onEditTriggered,
+    required this.isLoggedIn,
+    required this.onLoginSuccess,
+    required this.onLogout,
+  });
 
   @override
   State<ViolationListScreen> createState() => _ViolationListScreenState();

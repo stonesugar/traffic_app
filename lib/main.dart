@@ -55,47 +55,65 @@ class MainNavigationScreen extends StatefulWidget {
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
-  // 🚩 關鍵修改：將初始值設為 1，App 一進來就是「案件檢索」
-  int _currentIndex = 1;
+  int _currentIndex = 1; // 預設顯示「案件檢索」
+  bool _isLoggedIn = false; // 🚩 全域登入狀態
+  Map<String, dynamic>? _dataToEdit; // 儲存要修改的資料
 
-  // 用於暫存從清單頁傳回來的修改資料
-  Map<String, dynamic>? _dataToEdit;
+  // 🔐 登入成功的回呼方法
+  void _onLoginSuccess() {
+    setState(() {
+      _isLoggedIn = true;
+    });
+  }
 
-  // 定義跳轉並修改的方法
+  // 🔓 登出的回呼方法
+  void _onLogout() {
+    setState(() {
+      _isLoggedIn = false;
+    });
+  }
+
+  // 🔄 處理「修改」按鈕點擊
   void _jumpToEdit(Map<String, dynamic> data) {
     setState(() {
-      _dataToEdit = data; // 設定要修改的資料
-      _currentIndex = 0; // 跳回第一個分頁 (資料錄入) 進行編輯
+      _dataToEdit = data;
+      _currentIndex = 0; // 切換到「資料錄入」分頁
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // 定義分頁內容
+    // 🚩 在這裡定義頁面清單，並將狀態傳進去
     final List<Widget> pages = [
+      // 1. 資料錄入頁
       ViolationFormScreen(
         initialData: _dataToEdit,
+        isLoggedIn: _isLoggedIn, // 傳入登入狀態
+        onLoginSuccess: _onLoginSuccess, // 傳入登入方法
         onSaveComplete: () {
           setState(() {
             _dataToEdit = null;
-            _currentIndex = 1; // 儲存完自動跳回檢索頁，體驗更好
+            _currentIndex = 1; // 儲存完跳回清單
           });
         },
-
-        // 🚩 新增：處理取消按鈕
         onCancel: () {
           setState(() {
             _dataToEdit = null;
-            _currentIndex = 1; // 取消後直接回清單
+            _currentIndex = 1; // 取消後跳回清單
           });
         },
       ),
-
-      ViolationListScreen(onEditTriggered: _jumpToEdit),
+      // 2. 案件檢索頁
+      ViolationListScreen(
+        onEditTriggered: _jumpToEdit,
+        isLoggedIn: _isLoggedIn, // 傳入登入狀態
+        onLoginSuccess: _onLoginSuccess, // 傳入登入方法
+        onLogout: _onLogout, // 傳入登出方法
+      ),
     ];
 
     return Scaffold(
-      // 🚩 關鍵修改：將 body 從 pages[_currentIndex] 換成 IndexedStack
+      // 使用 IndexedStack 凍結頁面狀態，切換時不會重置
       body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
