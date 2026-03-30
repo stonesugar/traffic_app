@@ -297,7 +297,6 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
                             .toList(),
                         onChanged: (v) =>
                             setState(() => _selectedVehicleType = v),
-                        validator: (v) => v == null ? '必填' : null,
                       ),
                     ),
                   ],
