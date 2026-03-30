@@ -14,14 +14,25 @@ class ViolationListScreen extends StatefulWidget {
 }
 
 class _ViolationListScreenState extends State<ViolationListScreen> {
-  String _searchQuery = "";
-  bool _isExporting = false;
-  // 🚩 新增：登入狀態控制
-  bool _isLoggedIn = false;
+  // --- 狀態控制變數 ---
+  String _searchQuery = ""; // 搜尋關鍵字
+  String _selectedStatus = "全部"; // 篩選狀態 (全部/尚未定案)
+  bool _isExporting = false; // 是否正在匯出中 (控制按鈕狀態)
+  bool _isLoggedIn = false; // 管理員登入狀態
 
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // --- 🚩 管理員登入視窗 ---
+  // --- 分頁控制 ---
+  int _currentPage = 1; // 當前頁碼
+  final int _itemsPerPage = 25; // 每頁顯示筆數 (配合精簡卡片調高至 25)
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // --- 🔐 管理員登入驗證 (stone / 661222) ---
   void _showLoginDialog() {
     final TextEditingController userCtrl = TextEditingController();
     final TextEditingController passCtrl = TextEditingController();
@@ -35,18 +46,12 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
           children: [
             TextField(
               controller: userCtrl,
-              decoration: const InputDecoration(
-                labelText: '帳號',
-                hintText: '請輸入帳號',
-              ),
+              decoration: const InputDecoration(labelText: '帳號'),
             ),
             TextField(
               controller: passCtrl,
-              obscureText: true, // 隱藏密碼
-              decoration: const InputDecoration(
-                labelText: '密碼',
-                hintText: '請輸入密碼',
-              ),
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '密碼'),
             ),
           ],
         ),
@@ -57,12 +62,11 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
           ),
           ElevatedButton(
             onPressed: () {
-              // 🚩 檢查帳號: stone, 密碼: 661222
               if (userCtrl.text == 'stone' && passCtrl.text == '661222') {
                 setState(() => _isLoggedIn = true);
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('🔓 登入成功，已開啟管理權限')),
+                  const SnackBar(content: Text('🔓 登入成功，管理權限已開啟')),
                 );
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -80,211 +84,34 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
     );
   }
 
-  // --- 分頁控制變數 ---
-  int _currentPage = 1;
-  final int _itemsPerPage = 20;
+  // --- 🧠 核心過濾邏輯：處理搜尋與「尚未定案」篩選 ---
+  List<QueryDocumentSnapshot> _getFilteredDocs(
+    List<QueryDocumentSnapshot> docs,
+  ) {
+    return docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
 
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
+      // 1. 關鍵字過濾 (不分大小寫，掃描多個欄位)
+      final query = _searchQuery.trim().toLowerCase();
+      final searchableText = [
+        data['caseNo'],
+        data['plateNo'],
+        data['location'],
+        data['facts'],
+      ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
 
-  // --- 詳細日誌紀錄方法 ---
-  Future<void> _addDetailedLog({
-    required String type,
-    required String status,
-    required String details,
-    List<String>? errorList,
-    String? fileName,
-  }) async {
-    try {
-      await FirebaseFirestore.instance.collection('operation_logs').add({
-        'type': type,
-        'status': status,
-        'details': details,
-        'errorList': errorList ?? [],
-        'fileName': fileName ?? '未知檔案',
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint('日誌寫入失敗: $e');
-    }
-  }
+      bool matchesSearch = searchableText.contains(query);
 
-  // --- 刪除確認 ---
-  Future<void> _confirmDelete(BuildContext context, String caseNo) async {
-    final bool? isConfirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.warning_rounded, color: Colors.orange),
-            SizedBox(width: 8),
-            Text('確認刪除'),
-          ],
-        ),
-        content: Text('您確定要刪除案號：$caseNo 嗎？\n此動作將無法復原。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('確認刪除', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (isConfirmed == true) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('violations')
-            .doc(caseNo)
-            .delete();
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🗑 案件已成功刪除'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      } catch (e) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('❌ 刪除失敗: $e')));
-      }
-    }
-  }
-
-  // --- 匯出 Excel ---
-  Future<void> _handleExport() async {
-    if (_isExporting) return;
-    setState(() => _isExporting = true);
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('violations')
-          .orderBy('createdAt', descending: true)
-          .get();
-
-      await ExcelService.exportToExcel(snapshot.docs);
-      await _addDetailedLog(
-        type: '匯出',
-        status: '成功',
-        details: '匯出 ${snapshot.docs.length} 筆案件資料',
-      );
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Excel 下載已觸發'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('❌ 匯出失敗: $e')));
-      await _addDetailedLog(type: '匯出', status: '失敗', details: '系統錯誤: $e');
-    } finally {
-      if (mounted) setState(() => _isExporting = false);
-    }
-  }
-
-  // --- 匯入 Excel 或 CSV (雙引擎防彈版) ---
-  Future<void> _handleImport() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx', 'csv'],
-    );
-
-    final file = result?.files.first;
-    final bytes = file?.bytes;
-    final fileName = file?.name ?? '未知檔案';
-    final extension = file?.extension?.toLowerCase();
-
-    if (bytes == null) return;
-    if (!context.mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    try {
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      ImportResult importResult;
-      if (extension == 'csv') {
-        importResult = await ExcelService.importCsv(bytes);
-      } else {
-        importResult = await ExcelService.importExcel(bytes);
+      // 2. 狀態篩選：判斷 result 欄位是否為空白/null
+      bool matchesStatus = true;
+      if (_selectedStatus == "尚未定案") {
+        final res = data['result'];
+        // 判定為尚未定案的條件：null、空字串、或是只有空格
+        matchesStatus = (res == null || res.toString().trim().isEmpty);
       }
 
-      final List<Map<String, dynamic>> importedData = importResult.data;
-      final List<String> errorLogs = importResult.errors;
-
-      if (importedData.isEmpty && errorLogs.isEmpty) throw '檔案內查無有效資料';
-
-      final firestore = FirebaseFirestore.instance;
-      int count = 0;
-
-      if (importedData.isNotEmpty) {
-        for (var i = 0; i < importedData.length; i += 500) {
-          final batch = firestore.batch();
-          final chunk = importedData.sublist(
-            i,
-            i + 500 > importedData.length ? importedData.length : i + 500,
-          );
-
-          for (final item in chunk) {
-            final docRef = firestore
-                .collection('violations')
-                .doc(item['caseNo']);
-            batch.set(docRef, item, SetOptions(merge: true));
-          }
-          await batch.commit();
-          count += chunk.length;
-        }
-      }
-
-      String finalStatus = errorLogs.isEmpty ? '成功' : '部分成功';
-      await _addDetailedLog(
-        type: '匯入 ($extension)',
-        status: finalStatus,
-        fileName: fileName,
-        details: '成功匯入: $count 筆\n錯誤/略過: ${errorLogs.length} 筆',
-        errorList: errorLogs,
-      );
-
-      if (!context.mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🎉 成功匯入 $count 筆資料！'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      await _addDetailedLog(
-        type: '匯入',
-        status: '失敗',
-        fileName: fileName,
-        details: '系統解析崩潰: $e',
-      );
-      if (!context.mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ 匯入失敗: $e'), backgroundColor: Colors.red),
-      );
-    }
+      return matchesSearch && matchesStatus;
+    }).toList();
   }
 
   @override
@@ -297,26 +124,22 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
-        // 🚩 重點修改：將按鈕移至這裡
         actions: [
-          // 🚩 如果沒登入，只顯示「鎖頭」按鈕
+          // 權限控管：未登入顯示鎖頭，已登入顯示管理工具
           if (!_isLoggedIn)
             IconButton(
               icon: const Icon(Icons.admin_panel_settings_rounded),
               onPressed: _showLoginDialog,
-              tooltip: '管理員登入',
             ),
-
-          // 🚩 如果已登入，顯示 3 個功能 + 登出按鈕
           if (_isLoggedIn) ...[
             IconButton(
               icon: const Icon(Icons.file_upload_rounded),
-              onPressed: _isExporting ? null : _handleImport,
-              tooltip: '匯入檔案',
+              onPressed: _handleImport,
+              tooltip: '匯入',
             ),
             _isExporting
                 ? const Padding(
-                    padding: EdgeInsets.all(12.0),
+                    padding: EdgeInsets.all(12),
                     child: SizedBox(
                       width: 20,
                       height: 20,
@@ -326,7 +149,7 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
                 : IconButton(
                     icon: const Icon(Icons.file_download_rounded),
                     onPressed: _handleExport,
-                    tooltip: '匯出 Excel',
+                    tooltip: '匯出',
                   ),
             IconButton(
               icon: const Icon(Icons.history_rounded),
@@ -336,18 +159,10 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
                   builder: (context) => const OperationLogScreen(),
                 ),
               ),
-              tooltip: '操作日誌',
             ),
-            // 🚩 新增：登出按鈕
             IconButton(
               icon: const Icon(Icons.logout_rounded, color: Colors.red),
-              onPressed: () {
-                setState(() => _isLoggedIn = false);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('🔒 已登出管理模式')));
-              },
-              tooltip: '登出',
+              onPressed: () => setState(() => _isLoggedIn = false),
             ),
           ],
           const SizedBox(width: 8),
@@ -355,63 +170,83 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
       ),
       body: Column(
         children: [
-          _buildSearchBar(),
-          Expanded(child: _buildMainList()),
-          // 🚩 這裡原本的 _buildBottomActions() 已經刪除了
+          _buildSearchBar(), // 頂部搜尋與篩選列
+          Expanded(child: _buildMainList()), // 資料清單主體
         ],
       ),
     );
   }
 
+  // --- 🔍 搜尋列 UI：搜尋框與篩選選單並排 ---
   Widget _buildSearchBar() {
     return Container(
-      // 將原本底部的 16 稍微縮減或維持，看你喜歡的緊湊感
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            // 🚩 這裡已經修正為新的 .withValues 語法
             color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 5,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: TextField(
-        controller: _searchCtrl,
-        decoration: InputDecoration(
-          hintText: '輸入關鍵字搜尋...',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.cancel_rounded),
-                  onPressed: () {
-                    _searchCtrl.clear();
-                    setState(() {
-                      _searchQuery = "";
-                      _currentPage = 1; // 清除時回到第一頁
-                    });
-                  },
-                )
-              : null,
-          filled: true,
-          fillColor: Colors.grey[100],
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: '搜尋車牌/案號/地點...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                filled: true,
+                fillColor: Colors.grey[100],
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: EdgeInsets.zero,
+              ),
+              onChanged: (v) => setState(() {
+                _searchQuery = v;
+                _currentPage = 1;
+              }),
+            ),
           ),
-          contentPadding: EdgeInsets.zero,
-        ),
-        onChanged: (value) => setState(() {
-          _searchQuery = value;
-          _currentPage = 1; // 搜尋時回到第一頁
-        }),
+          const SizedBox(width: 10),
+          // 狀態篩選下拉選單
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedStatus,
+                isDense: true,
+                style: TextStyle(
+                  color: Colors.blue[800],
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+                items: ['全部', '尚未定案']
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .toList(),
+                onChanged: (v) => setState(() {
+                  _selectedStatus = v!;
+                  _currentPage = 1;
+                }),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // --- 分頁版列表渲染 ---
+  // --- 📄 清單主體：結合 Firebase 與 分頁邏輯 ---
   Widget _buildMainList() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -419,67 +254,28 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
           .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
+        if (snapshot.hasError)
           return Center(child: Text('連線錯誤: ${snapshot.error}'));
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting)
           return const Center(child: CircularProgressIndicator());
-        }
 
-        final List<QueryDocumentSnapshot> docs = snapshot.data!.docs;
-
-        // 🚩 1. 終極全欄位搜尋過濾
-        final filteredDocs = docs.where((doc) {
-          if (_searchQuery.trim().isEmpty) return true; // 沒輸入關鍵字就全顯示
-
-          final data = doc.data() as Map<String, dynamic>;
-          final query = _searchQuery.toLowerCase();
-
-          // 💡 秘訣：把所有欄位(包含轉換過的時間)串成一個字串，一次性比對！
-          final searchableText = [
-            data['caseNo'],
-            data['result'],
-            data['plateNo'],
-            data['vehicleType'],
-            data['fine'],
-            _formatDate(data['issueDate']),
-            _formatDate(data['violationDate']),
-            _formatTime(data['violationTime']),
-            data['city'],
-            data['district'],
-            data['location'],
-            data['facts'],
-            data['handlingUnit'],
-            data['unissuedReason'],
-          ].map((e) => (e ?? '').toString().toLowerCase()).join(' | ');
-
-          return searchableText.contains(query);
-        }).toList();
-
+        // 1. 套用搜尋與篩選邏輯
+        final filteredDocs = _getFilteredDocs(snapshot.data!.docs);
         if (filteredDocs.isEmpty) return _buildEmptyState();
 
-        // 2. 分頁計算
+        // 2. 計算分頁
         int totalItems = filteredDocs.length;
         int totalPages = (totalItems / _itemsPerPage).ceil();
-
         if (_currentPage > totalPages) _currentPage = totalPages;
-        if (_currentPage < 1) _currentPage = 1;
-
         int startIndex = (_currentPage - 1) * _itemsPerPage;
-        int endIndex = startIndex + _itemsPerPage;
-        if (endIndex > totalItems) endIndex = totalItems;
-
+        int endIndex = (startIndex + _itemsPerPage).clamp(0, totalItems);
         final paginatedDocs = filteredDocs.sublist(startIndex, endIndex);
 
-        // 3. 渲染
         return Column(
           children: [
             Expanded(
               child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                padding: const EdgeInsets.all(16),
                 itemCount: paginatedDocs.length,
                 itemBuilder: (context, index) {
                   final data =
@@ -495,12 +291,84 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
     );
   }
 
-  // --- 分頁控制列 UI ---
+  // --- 🃏 高密度卡片 UI ---
+  Widget _buildViolationCard(BuildContext context, Map<String, dynamic> data) {
+    final bool isUnfinished =
+        data['result'] == null || data['result'].toString().trim().isEmpty;
+    final bool isSuccess = data['result'] == '舉發';
+
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        // 如果尚未定案，邊框顏色加深
+        side: BorderSide(
+          color: isUnfinished ? Colors.orange[200]! : Colors.grey[200]!,
+        ),
+      ),
+      // 尚未定案的卡片給予淡淡的背景色
+      color: isUnfinished
+          ? Colors.orange[50]?.withValues(alpha: 0.3)
+          : Colors.white,
+      child: ListTile(
+        dense: true, // 高密度模式，減少高度
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: isUnfinished
+                ? Colors.orange[50]
+                : (isSuccess ? Colors.green[50] : Colors.red[50]),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            isUnfinished
+                ? Icons.pending_actions_rounded
+                : (isSuccess
+                      ? Icons.check_circle_rounded
+                      : Icons.info_outline_rounded),
+            color: isUnfinished
+                ? Colors.orange[700]
+                : (isSuccess ? Colors.green[700] : Colors.red[700]),
+            size: 20,
+          ),
+        ),
+        title: Text(
+          '車牌: ${data['plateNo'] ?? "未知"}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        subtitle: Text(
+          '案號: ${data['caseNo']}\n日期: ${_formatDate(data['violationDate'])}',
+          style: const TextStyle(fontSize: 12, height: 1.2),
+        ),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+        onTap: () => _showDetailDialog(context, data),
+      ),
+    );
+  }
+
+  // --- 📭 空狀態 UI ---
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_off_rounded, size: 64, color: Colors.grey[200]),
+          const SizedBox(height: 16),
+          const Text('查無相關案件紀錄', style: TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  // --- 🔢 分頁控制列 UI ---
   Widget _buildPaginationControls(int totalPages, int totalItems) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey[200]!)),
       ),
       child: Row(
@@ -517,23 +385,16 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
                 onPressed: _currentPage > 1
                     ? () => setState(() => _currentPage--)
                     : null,
-                color: Colors.blue[700],
-                disabledColor: Colors.grey[300],
               ),
               Text(
                 '$_currentPage / $totalPages',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right_rounded),
                 onPressed: _currentPage < totalPages
                     ? () => setState(() => _currentPage++)
                     : null,
-                color: Colors.blue[700],
-                disabledColor: Colors.grey[300],
               ),
             ],
           ),
@@ -542,12 +403,13 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
     );
   }
 
+  // --- 🛠 其他功能性方法 (Slidable, 刪除, 匯入匯出, 彈窗) ---
+
   Widget _buildSlidableCard(Map<String, dynamic> data) {
-    final String caseNo = data['caseNo'] ?? "N/A";
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Slidable(
-        key: ValueKey(caseNo),
+        key: ValueKey(data['caseNo']),
         endActionPane: ActionPane(
           motion: const DrawerMotion(),
           extentRatio: 0.5,
@@ -555,14 +417,12 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
             SlidableAction(
               onPressed: (_) => widget.onEditTriggered(data),
               backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
               icon: Icons.edit_rounded,
               label: '修改',
             ),
             SlidableAction(
-              onPressed: (context) => _confirmDelete(context, caseNo),
+              onPressed: (context) => _confirmDelete(context, data['caseNo']),
               backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
               icon: Icons.delete_rounded,
               label: '刪除',
               borderRadius: const BorderRadius.horizontal(
@@ -576,115 +436,112 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
     );
   }
 
-  Widget _buildViolationCard(BuildContext context, Map<String, dynamic> data) {
-    final bool isSuccess = data['result'] == '成功';
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10), // 稍微圓角一點
-        side: BorderSide(color: Colors.grey[200]!),
-      ),
-      child: ListTile(
-        // 🚩 核心修改：開啟高密度模式
-        dense: true,
-        // 🚩 縮減上下內距
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        // 🚩 縮小左側圖示尺寸
-        leading: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: isSuccess ? Colors.green[50] : Colors.red[50],
-            borderRadius: BorderRadius.circular(8),
+  Future<void> _confirmDelete(BuildContext context, String caseNo) async {
+    final bool? res = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('確認刪除'),
+        content: Text('確定要刪除案號 $caseNo 嗎？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
           ),
-          child: Icon(
-            isSuccess ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-            color: isSuccess ? Colors.green[700] : Colors.red[700],
-            size: 20, // 圖示也縮小一點
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('刪除', style: TextStyle(color: Colors.white)),
           ),
-        ),
-        title: Text(
-          '車牌: ${data['plateNo'] ?? "未知"}',
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
-          ), // 字體稍微調小
-        ),
-        subtitle: Text(
-          '案號: ${data['caseNo']}\n日期: ${_formatDate(data['violationDate'])}',
-          style: const TextStyle(fontSize: 12, height: 1.3), // 縮減行高
-        ),
-        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
-        onTap: () async {
-          if (!context.mounted) return;
-          _showDetailDialog(context, data);
-        },
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.search_off_rounded, size: 64, color: Colors.grey[300]),
-          const SizedBox(height: 16),
-          const Text('查無相關案件紀錄', style: TextStyle(color: Colors.grey)),
         ],
       ),
     );
+    if (res == true) {
+      await FirebaseFirestore.instance
+          .collection('violations')
+          .doc(caseNo)
+          .delete();
+    }
   }
 
-  // --- 完整 14 欄位詳細資訊彈窗 (支援文字複製版) ---
+  Future<void> _handleExport() async {
+    setState(() => _isExporting = true);
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('violations')
+          .get();
+      await ExcelService.exportToExcel(snapshot.docs);
+      await _addDetailedLog(
+        type: '匯出',
+        status: '成功',
+        details: '匯出 ${snapshot.docs.length} 筆',
+      );
+    } catch (e) {
+      debugPrint('匯出失敗: $e');
+    } finally {
+      setState(() => _isExporting = false);
+    }
+  }
+
+  Future<void> _handleImport() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx', 'csv'],
+    );
+    if (result == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final file = result.files.first;
+      ImportResult importResult = (file.extension == 'csv')
+          ? await ExcelService.importCsv(file.bytes!)
+          : await ExcelService.importExcel(file.bytes!);
+
+      final firestore = FirebaseFirestore.instance;
+      for (final item in importResult.data) {
+        await firestore
+            .collection('violations')
+            .doc(item['caseNo'])
+            .set(item, SetOptions(merge: true));
+      }
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('🎉 成功匯入 ${importResult.data.length} 筆！')),
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('❌ 匯入失敗: $e')));
+    }
+  }
+
   void _showDetailDialog(BuildContext context, Map<String, dynamic> data) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text(
-          '案件詳細資訊',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        // 🚩 關鍵修改：用 SelectionArea 包住整個內容區域，讓裡面的文字都可以被反白複製
+        title: const Text('案件詳細資訊'),
         content: SelectionArea(
+          // 🚩 支援長按文字複製
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 _infoRow('案號', data['caseNo']),
+                _infoRow('車牌', data['plateNo']),
                 _infoRow(
                   '結果',
                   data['result'],
-                  color: data['result'] == '舉法' ? Colors.green : Colors.red,
-                  isBold: true,
+                  color: data['result'] == '成功' ? Colors.green : Colors.red,
                 ),
-                const Divider(),
-                _infoRow('車牌', data['plateNo']),
-                _infoRow('車種', data['vehicleType']),
-                _infoRow('罰鍰', '${data['fine'] ?? 0} 元'),
-                const Divider(),
-                _infoRow('舉發日期', _formatDate(data['issueDate'])),
-                _infoRow('違規日期', _formatDate(data['violationDate'])),
-                _infoRow('違規時間', _formatTime(data['violationTime'])),
                 _infoRow(
                   '違規地點',
                   '${data['city'] ?? ''}${data['district'] ?? ''}${data['location'] ?? ''}',
                 ),
-                const Divider(),
                 _infoRow('違規事實', data['facts']),
-                _infoRow('承辦單位', data['handlingUnit']),
-                if (data['result'] == '失敗' &&
-                    (data['unissuedReason'] != null &&
-                        data['unissuedReason'].toString().isNotEmpty))
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    child: _infoRow(
-                      '不舉發原因',
-                      data['unissuedReason'],
-                      color: Colors.red,
-                    ),
-                  ),
               ],
             ),
           ),
@@ -692,21 +549,16 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('關閉', style: TextStyle(fontSize: 16)),
+            child: const Text('關閉'),
           ),
         ],
       ),
     );
   }
 
-  Widget _infoRow(
-    String label,
-    dynamic value, {
-    Color? color,
-    bool isBold = false,
-  }) {
+  Widget _infoRow(String label, dynamic value, {Color? color}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -718,39 +570,28 @@ class _ViolationListScreenState extends State<ViolationListScreen> {
             ),
           ),
           Expanded(
-            child: Text(
-              '${value ?? "無"}',
-              style: TextStyle(
-                color: color,
-                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
+            child: Text('${value ?? "無"}', style: TextStyle(color: color)),
           ),
         ],
       ),
     );
   }
 
-  // --- 日期格式過濾器 ---
-  String _formatDate(dynamic dateString) {
-    if (dateString == null || dateString.toString().trim().isEmpty) return '無';
-    return dateString.toString().split('T')[0];
+  Future<void> _addDetailedLog({
+    required String type,
+    required String status,
+    required String details,
+  }) async {
+    await FirebaseFirestore.instance.collection('operation_logs').add({
+      'type': type,
+      'status': status,
+      'details': details,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
   }
 
-  // --- 時間格式過濾器 (防彈進化版) ---
-  String _formatTime(dynamic timeData) {
-    if (timeData == null || timeData.toString().trim().isEmpty) return '無';
-    String str = timeData.toString().trim();
-
-    if (str.contains(' ')) str = str.split(' ').last;
-    if (str.contains('.')) str = str.split('.')[0];
-
-    String digitsOnly = str.replaceAll(':', '');
-    if (RegExp(r'^\d{3,4}$').hasMatch(digitsOnly)) {
-      String hours = digitsOnly.substring(0, digitsOnly.length - 2);
-      String minutes = digitsOnly.substring(digitsOnly.length - 2);
-      return '$hours:$minutes';
-    }
-    return str;
+  String _formatDate(dynamic date) {
+    if (date == null) return '無';
+    return date.toString().split('T')[0].replaceAll('-', '/');
   }
 }
