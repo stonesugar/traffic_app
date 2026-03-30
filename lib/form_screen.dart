@@ -548,6 +548,11 @@ class _ViolationFormScreenState extends State<ViolationFormScreen> {
           initialDate: date ?? DateTime.now(),
           firstDate: DateTime(2020),
           lastDate: DateTime(2030),
+          // 🚩 強制指定使用中文地區設定，這樣輸入框就會變成 YYYY/MM/DD
+          locale: const Locale('zh', 'TW'),
+          // 🚩 你也可以自定義輸入框的提示文字
+          fieldLabelText: label,
+          fieldHintText: '年/月/日',
         );
         if (d != null) onPicked(d);
       },
